@@ -24,6 +24,7 @@ def arg_parse():
     parser.add_argument("--reso", dest='reso', help=
     "Input resolution of the network. Increase to increase accuracy. Decrease to increase speed",
                         default="416", type=str)
+    parser.add_argument("--extrinsics", dest="extrinsics", help="Decides to perform extrinsic calibration.")
     return parser.parse_args()
 
 
@@ -94,94 +95,96 @@ D = computeDistortionCoefficients(K)
 print(D)
 
 # ---------------------Extrinsic Calibration-------------------------------------------------------------------------- #
-
+extrinsics = args.extrinsics
 # Model Initialization
-confidence = float(args.confidence)
-nms_thresh = float(args.nms_thresh)
-CUDA = torch.cuda.is_available()
-num_classes = 80
-colors = pkl.load(open("pallete", "rb"))
-print("Loading network.....")
-model = Darknet(args.cfgfile)
-model.load_weights(args.weightsfile)
-print("Network successfully loaded")
-model.net_info["height"] = args.reso
-inp_dim = int(model.net_info["height"])
-assert inp_dim % 32 == 0
-assert inp_dim > 32
-if CUDA:
-    model.cuda()
 
-mapx, mapy = undistortMap(frame, min_factor)
-sift = cv2.xfeatures2d.SIFT_create()
-count = 0
-kp1 = []
-lines = []
-cap = cv2.VideoCapture("sample_video/" + video_file_name)
-while True:
-    ret, frame = cap.read()
-    if ret is not True:
-        break
-    if count % 4 == 0:
-        frame = cv2.remap(frame, mapx, mapy, cv2.INTER_LINEAR)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        foot_print, frame, bboxs = get_foot_print(gray, frame, inp_dim, confidence, num_classes, nms_thresh, CUDA, model)
-        if not kp1:
-            kp1, des1 = sift.detectAndCompute(gray, mask=foot_print)
-        else:
-            kp2, des2 = sift.detectAndCompute(gray, mask=foot_print)
-            if kp2:
-                FLANN_INDEX_KDTREE = 0
-                index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-                search_params = dict(checks=50)
-                flann = cv2.FlannBasedMatcher(index_params, search_params)
-                matches = flann.knnMatch(des1, des2, k=2)
+if extrinsics:
+    confidence = float(args.confidence)
+    nms_thresh = float(args.nms_thresh)
+    CUDA = torch.cuda.is_available()
+    num_classes = 80
+    colors = pkl.load(open("pallete", "rb"))
+    print("Loading network.....")
+    model = Darknet(args.cfgfile)
+    model.load_weights(args.weightsfile)
+    print("Network successfully loaded")
+    model.net_info["height"] = args.reso
+    inp_dim = int(model.net_info["height"])
+    assert inp_dim % 32 == 0
+    assert inp_dim > 32
+    if CUDA:
+        model.cuda()
 
-                good = []
-                for m, n in matches:
-                    if m.distance < 0.75 * n.distance:
-                        good.append(m)
-                src_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-                dst_pts = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+    mapx, mapy = undistortMap(frame, min_factor)
+    sift = cv2.xfeatures2d.SIFT_create()
+    count = 0
+    kp1 = []
+    lines = []
+    cap = cv2.VideoCapture("sample_video/" + video_file_name)
+    while True:
+        ret, frame = cap.read()
+        if ret is not True:
+            break
+        if count % 4 == 0:
+            frame = cv2.remap(frame, mapx, mapy, cv2.INTER_LINEAR)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            foot_print, frame, bboxs = get_foot_print(gray, frame, inp_dim, confidence, num_classes, nms_thresh, CUDA, model)
+            if not kp1:
+                kp1, des1 = sift.detectAndCompute(gray, mask=foot_print)
+            else:
+                kp2, des2 = sift.detectAndCompute(gray, mask=foot_print)
+                if kp2:
+                    FLANN_INDEX_KDTREE = 0
+                    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+                    search_params = dict(checks=50)
+                    flann = cv2.FlannBasedMatcher(index_params, search_params)
+                    matches = flann.knnMatch(des1, des2, k=2)
 
-                for x1, y1, x2, y2 in bboxs:
-                    roi_indices = np.where(np.logical_and(np.logical_and(np.greater_equal(dst_pts.transpose()[1], y1),
-                                                                         np.less_equal(dst_pts.transpose()[1], y2)),
-                                                          np.logical_and(np.greater_equal(dst_pts.transpose()[0], x1),
-                                                                         np.less_equal(dst_pts.transpose()[0], x2))))
-                    x1s, y1s, x2s, y2s = src_pts[roi_indices[1]].transpose()[0][0], \
-                                         src_pts[roi_indices[1]].transpose()[1][0], \
-                                         dst_pts[roi_indices[1]].transpose()[0][0], \
-                                         dst_pts[roi_indices[1]].transpose()[1][0]
-                    mags, angles = cv2.cartToPolar((x1s - x2s), (y1s - y2s), angleInDegrees=True)
-                    if angles is not None:
-                        if len(angles) > 10:
-                            lower_angle_thresh, upper_angle_thresh, lower_mag_thresh, upper_mag_thresh = get_thresholds(
-                                angles, mags)
-                            for x1, y1, x2, y2, mag, angle in zip(x1s, y1s, x2s, y2s, mags, angles):
-                                if mag >= 20 and upper_mag_thresh >= mag >= lower_mag_thresh \
-                                        and upper_angle_thresh >= angle >= lower_angle_thresh:
-                                    cv2.circle(frame, (int(x1), int(y1)), 3, (255, 0, 0), -1)
-                                    cv2.circle(frame, (int(x2), int(y2)), 3, (0, 255, 0), -1)
-                                    cv2.line(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
-                                    if y1 != y2:
-                                        theta = np.arctan(-(x2 - x1) / (y2 - y1))
-                                    else:
-                                        if (x1 - x2) > 0:
-                                            theta = -np.pi / 2
+                    good = []
+                    for m, n in matches:
+                        if m.distance < 0.75 * n.distance:
+                            good.append(m)
+                    src_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+                    dst_pts = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+
+                    for x1, y1, x2, y2 in bboxs:
+                        roi_indices = np.where(np.logical_and(np.logical_and(np.greater_equal(dst_pts.transpose()[1], y1),
+                                                                             np.less_equal(dst_pts.transpose()[1], y2)),
+                                                              np.logical_and(np.greater_equal(dst_pts.transpose()[0], x1),
+                                                                             np.less_equal(dst_pts.transpose()[0], x2))))
+                        x1s, y1s, x2s, y2s = src_pts[roi_indices[1]].transpose()[0][0], \
+                                             src_pts[roi_indices[1]].transpose()[1][0], \
+                                             dst_pts[roi_indices[1]].transpose()[0][0], \
+                                             dst_pts[roi_indices[1]].transpose()[1][0]
+                        mags, angles = cv2.cartToPolar((x1s - x2s), (y1s - y2s), angleInDegrees=True)
+                        if angles is not None:
+                            if len(angles) > 10:
+                                lower_angle_thresh, upper_angle_thresh, lower_mag_thresh, upper_mag_thresh = get_thresholds(
+                                    angles, mags)
+                                for x1, y1, x2, y2, mag, angle in zip(x1s, y1s, x2s, y2s, mags, angles):
+                                    if mag >= 20 and upper_mag_thresh >= mag >= lower_mag_thresh \
+                                            and upper_angle_thresh >= angle >= lower_angle_thresh:
+                                        cv2.circle(frame, (int(x1), int(y1)), 3, (255, 0, 0), -1)
+                                        cv2.circle(frame, (int(x2), int(y2)), 3, (0, 255, 0), -1)
+                                        cv2.line(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
+                                        if y1 != y2:
+                                            theta = np.arctan(-(x2 - x1) / (y2 - y1))
                                         else:
-                                            theta = np.pi / 2
-                                    rho = y1 * np.sin(theta) + x1 * np.cos(theta)
-                                    lines.append([(x1, y1), (x2, y2)])
-            kp1 = kp2
-            des1 = des2
-            cv2.imshow("Frame", frame)
-            if cv2.waitKey(1) == 27:
-                break
-    count = count + 1
-cap.release()
-cv2.destroyAllWindows()
+                                            if (x1 - x2) > 0:
+                                                theta = -np.pi / 2
+                                            else:
+                                                theta = np.pi / 2
+                                        rho = y1 * np.sin(theta) + x1 * np.cos(theta)
+                                        lines.append([(x1, y1), (x2, y2)])
+                kp1 = kp2
+                des1 = des2
+                cv2.imshow("Frame", frame)
+                if cv2.waitKey(1) == 27:
+                    break
+        count = count + 1
+    cap.release()
+    cv2.destroyAllWindows()
 
-with open("polar/" + str(min_factor) + video_file_name, "wb") as fp:
-    pkl.dump(lines, fp)
-print("File has been written as polar/" + str(min_factor) + video_file_name)
+    with open("polar/" + str(min_factor) + video_file_name, "wb") as fp:
+        pkl.dump(lines, fp)
+    print("File has been written as polar/" + str(min_factor) + video_file_name)
