@@ -1,0 +1,5 @@
+torchvision
+opencv-python==3.4.2.17
+matplotlib
+scikit-image
+opencv-contrib-python==3.4.2.17
