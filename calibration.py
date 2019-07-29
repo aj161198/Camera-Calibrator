@@ -62,7 +62,6 @@ coordinates, visibility_indices, keypoints_indices = get_trajectories("sample_vi
 
 cap = cv2.VideoCapture("sample_video/" + video_file_name)
 ret, frame = cap.read()
-print(ret, "sample_video/" + video_file_name)
 h, w, c = frame.shape
 display = args.display
 x_distorted, y_distorted = post_process_trajectories(frame, coordinates, visibility_indices, keypoints_indices, display)
