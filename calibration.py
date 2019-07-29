@@ -63,7 +63,6 @@ coordinates, visibility_indices, keypoints_indices = get_trajectories("sample_vi
 
 cap = cv2.VideoCapture("sample_video/" + video_file_name)
 ret, frame = cap.read()
-print(ret, "sample_video/" + video_file_name)
 h, w, c = frame.shape
 display = args.display
 x_distorted, y_distorted = post_process_trajectories(frame, coordinates, visibility_indices, keypoints_indices, display)
@@ -178,13 +177,13 @@ if extrinsics:
                                         lines.append([(x1, y1), (x2, y2)])
                 kp1 = kp2
                 des1 = des2
-                cv2.imshow("Frame", frame)
-                if cv2.waitKey(1) == 27:
-                    break
-        count = count + 1
-    cap.release()
-    cv2.destroyAllWindows()
+            cv2.imshow("Frame", frame)
+            if cv2.waitKey(1) == 27:
+                break
+    count = count + 1
+cap.release()
+cv2.destroyAllWindows()
 
-    with open("polar/" + str(min_factor) + video_file_name, "wb") as fp:
-        pkl.dump(lines, fp)
-    print("File has been written as polar/" + str(min_factor) + video_file_name)
+with open("polar/" + str(min_factor) + video_file_name, "wb") as fp:
+    pkl.dump(lines, fp)
+print("File has been written as polar/" + str(min_factor) + video_file_name)
